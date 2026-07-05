@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Accountability Assistant</title>
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #ffffff);
+            --text-color: var(--tg-theme-text-color, #222222);
+            --hint-color: var(--tg-theme-hint-color, #999999);
+            --link-color: var(--tg-theme-link-color, #2481cc);
+            --button-color: var(--tg-theme-button-color, #2481cc);
+            --button-text-color: var(--tg-theme-button-text-color, #ffffff);
+            --secondary-bg-color: var(--tg-theme-secondary-bg-color, #f4f4f5);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-top: 0;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .task-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .task-card {
+            background-color: var(--secondary-bg-color);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            cursor: pointer;
+        }
+
+        .task-title {
+            font-weight: 600;
+            font-size: 16px;
+            margin: 0 0 4px 0;
+        }
+
+        .task-priority {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background-color: rgba(36, 129, 204, 0.1);
+            color: var(--link-color);
+            font-weight: 500;
+        }
+
+        .task-priority.high { background-color: rgba(255, 59, 48, 0.1); color: #ff3b30; }
+        .task-priority.medium { background-color: rgba(255, 149, 0, 0.1); color: #ff9500; }
+        
+        .task-summary {
+            font-size: 14px;
+            color: var(--hint-color);
+            margin: 8px 0 0 0;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .task-details {
+            display: none;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(0,0,0,0.1);
+        }
+
+        .task-details.expanded {
+            display: block;
+        }
+        
+        .details-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--hint-color);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        
+        .details-text {
+            font-size: 14px;
+            margin: 0 0 16px 0;
+            line-height: 1.5;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            flex: 1;
+            transition: opacity 0.2s;
+        }
+        
+        button:active {
+            opacity: 0.8;
+        }
+
+        .btn-primary {
+            background-color: var(--button-color);
+            color: var(--button-text-color);
+        }
+
+        .btn-secondary {
+            background-color: rgba(0,0,0,0.05);
+            color: var(--text-color);
+        }
+        
+        .btn-success {
+            background-color: #34c759;
+            color: white;
+        }
+
+        .draft-container {
+            display: none;
+            margin-top: 16px;
+            background-color: rgba(255,255,255,0.5);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(0,0,0,0.1);
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            width: 100%;
+            min-height: 150px;
+            box-sizing: border-box;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .loader {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            border-top-color: var(--button-color);
+            animation: spin 1s ease-in-out infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--hint-color);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Pending Tasks</h1>
+    <div id="taskList" class="task-list">
+        <!-- Tasks will be injected here -->
+        <div style="text-align: center; margin-top: 40px;">
+            <div class="loader" style="display: block; margin-bottom: 16px;"></div>
+            Loading tasks...
+        </div>
+    </div>
+
+    <script>
+        // Initialize Telegram Web App SDK
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+        
+        // Use API base path
+        const API_BASE = '/api/v1/webapp/tasks';
+
+        // State management
+        let tasksData = [];
+
+        // Fetch tasks on load
+        async function fetchTasks() {
+            try {
+                const response = await fetch(API_BASE, {
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                if (!response.ok) throw new Error('Failed to fetch tasks');
+                tasksData = await response.json();
+                renderTasks();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('taskList').innerHTML = `
+                    <div class="empty-state">
+                        <p>⚠️ Could not load tasks. Please try again later.</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderTasks() {
+            const container = document.getElementById('taskList');
+            
+            if (tasksData.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>🎉 All caught up!</h2>
+                        <p>You have no pending tasks right now.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = '';
+            
+            tasksData.forEach(task => {
+                const card = document.createElement('div');
+                card.className = 'task-card';
+                card.id = `task-${task._id}`;
+                
+                const isDrafting = task.workflow_state === 'Drafting';
+                const hasDraft = task.workflow_state === 'Pending Approval';
+                
+                card.innerHTML = `
+                    <div class="task-header" onclick="toggleDetails('${task._id}')">
+                        <div style="flex: 1; padding-right: 12px;">
+                            <h3 class="task-title">${task.title}</h3>
+                            <p class="task-summary">${task.summary}</p>
+                        </div>
+                        <span class="task-priority ${task.priority.toLowerCase()}">${task.priority}</span>
+                    </div>
+                    
+                    <div class="task-details" id="details-${task._id}">
+                        <div class="details-label">Deadline</div>
+                        <p class="details-text">${task.deadline || 'No deadline specified'}</p>
+                        
+                        <div class="details-label">Full Context</div>
+                        <p class="details-text">${task.summary}</p>
+                        
+                        <div id="loader-${task._id}" class="loader" style="margin-bottom: 16px;"></div>
+                        
+                        <textarea id="draft-container-${task._id}" class="draft-container" placeholder="Click Draft Reply to generate..." ${hasDraft ? 'style="display:block;"' : ''}>${hasDraft ? (task.description || '') : ''}</textarea>
+                        
+                        <div class="btn-group" style="margin-bottom: 16px;">
+                            <button class="btn-secondary" onclick="tg.openLink('https://mail.google.com/mail/u/0/#inbox/${task.thread_id}')">✉️ Open in Gmail App</button>
+                        </div>
+
+                        <div class="btn-group" id="btn-group-primary-${task._id}" ${hasDraft ? 'style="display:none;"' : ''}>
+                            <button class="btn-primary" onclick="draftReply('${task._id}')">✨ Draft Reply</button>
+                            <button class="btn-secondary" onclick="markDone('${task._id}')">Mark as Done</button>
+                        </div>
+                        
+                        <div class="btn-group" id="btn-group-approve-${task._id}" ${hasDraft ? '' : 'style="display:none;"'}>
+                            <button class="btn-success" onclick="approveAndSend('${task._id}')">Approve & Send</button>
+                            <button class="btn-secondary" onclick="markDone('${task._id}')">Discard & Mark Done</button>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        function toggleDetails(taskId) {
+            const details = document.getElementById(`details-${taskId}`);
+            details.classList.toggle('expanded');
+        }
+
+        async function draftReply(taskId) {
+            // UI updates for loading
+            document.getElementById(`btn-group-primary-${taskId}`).style.display = 'none';
+            document.getElementById(`loader-${taskId}`).style.display = 'block';
+            
+            try {
+                const response = await fetch(`${API_BASE}/${taskId}/draft`, { 
+                    method: 'POST',
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                if (!response.ok) throw new Error('Failed to generate draft');
+                
+                const data = await response.json();
+                
+                // Show draft and approve buttons
+                document.getElementById(`loader-${taskId}`).style.display = 'none';
+                const draftContainer = document.getElementById(`draft-container-${taskId}`);
+                draftContainer.value = data.draft;
+                draftContainer.style.display = 'block';
+                document.getElementById(`btn-group-approve-${taskId}`).style.display = 'flex';
+                
+            } catch (err) {
+                console.error(err);
+                tg.showAlert("Oops! Something went wrong while drafting.");
+                // Reset UI
+                document.getElementById(`loader-${taskId}`).style.display = 'none';
+                document.getElementById(`btn-group-primary-${taskId}`).style.display = 'flex';
+            }
+        }
+
+        async function approveAndSend(taskId) {
+            const draftText = document.getElementById(`draft-container-${taskId}`).value;
+            document.getElementById(`btn-group-approve-${taskId}`).style.display = 'none';
+            document.getElementById(`loader-${taskId}`).style.display = 'block';
+            
+            try {
+                const response = await fetch(`${API_BASE}/${taskId}/send`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'ngrok-skip-browser-warning': 'true'
+                    },
+                    body: JSON.stringify({ draft_text: draftText })
+                });
+                if (!response.ok) throw new Error('Failed to send email');
+                
+                tg.showAlert("✅ Email sent successfully!");
+                removeTaskCard(taskId);
+                
+            } catch (err) {
+                console.error(err);
+                tg.showAlert("Failed to send email. Please try again.");
+                document.getElementById(`loader-${taskId}`).style.display = 'none';
+                document.getElementById(`btn-group-approve-${taskId}`).style.display = 'flex';
+            }
+        }
+
+        async function markDone(taskId) {
+            try {
+                const response = await fetch(`${API_BASE}/${taskId}/done`, { 
+                    method: 'POST',
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                if (response.ok) {
+                    removeTaskCard(taskId);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function removeTaskCard(taskId) {
+            const card = document.getElementById(`task-${taskId}`);
+            if (card) {
+                card.style.opacity = '0';
+                setTimeout(() => {
+                    card.remove();
+                    tasksData = tasksData.filter(t => t._id !== taskId);
+                    if (tasksData.length === 0) renderTasks();
+                }, 300);
+            }
+        }
+
+        // Boot
+        fetchTasks();
+    </script>
+</body>
+</html>

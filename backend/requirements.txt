@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+beanie
+pydantic
+pydantic-settings
+google-auth
+google-auth-oauthlib
+google-api-python-client
+google-genai
+apscheduler
+python-dotenv
+httpx
+python-jose[cryptography]
+win11toast
