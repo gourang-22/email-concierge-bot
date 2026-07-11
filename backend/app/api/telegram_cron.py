@@ -14,6 +14,7 @@ from pydantic import BaseModel
 import logging
 import os
 import asyncio
+import httpx
 from google import genai
 
 class SendReplyRequest(BaseModel):
@@ -22,33 +23,58 @@ class SendReplyRequest(BaseModel):
 router = APIRouter(tags=["telegram_cron"])
 logger = logging.getLogger(__name__)
 
-@router.get("/cron/sync")
-async def cron_sync():
+@router.get("/telegram/set-webhook")
+async def set_telegram_webhook(request: Request):
+    if not settings.TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN not configured")
+        
+    # Extract the base URL from the incoming request (which would be the ngrok URL)
+    base_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{base_url}/api/v1/telegram/webhook"
+    
+    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/setWebhook"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json={"url": webhook_url})
+            resp.raise_for_status()
+            return {"status": "ok", "webhook_url": webhook_url, "telegram_response": resp.json()}
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+async def process_cron_sync():
     users = await User.find_all().to_list()
     for user in users:
-        await sync_user_emails(user)
-        result = await analyze_emails(user)
-        
-        new_tasks = result.get("new_tasks", [])
-        if new_tasks:
-            text = f"📬 You have {len(new_tasks)} new pending tasks waiting for your action."
+        try:
+            await sync_user_emails(user)
+            result = await analyze_emails(user)
             
-            reply_markup = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "Open Inbox", 
-                            "web_app": {"url": settings.TELEGRAM_WEBAPP_URL}
-                        }
-                    ]
-                ]
-            }
-            if settings.TELEGRAM_CHAT_ID and settings.TELEGRAM_WEBAPP_URL:
-                await send_telegram_message(text, settings.TELEGRAM_CHAT_ID, reply_markup)
-            else:
-                logger.warning("TELEGRAM_CHAT_ID or TELEGRAM_WEBAPP_URL not configured. Could not send Web App notification.")
+            new_tasks = result.get("new_tasks", [])
+            if new_tasks:
+                text = f"📬 You have {len(new_tasks)} new pending tasks waiting for your action."
                 
-    return {"status": "ok"}
+                reply_markup = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "Open Inbox", 
+                                "web_app": {"url": settings.TELEGRAM_WEBAPP_URL}
+                            }
+                        ]
+                    ]
+                }
+                if settings.TELEGRAM_CHAT_ID and settings.TELEGRAM_WEBAPP_URL:
+                    await send_telegram_message(text, settings.TELEGRAM_CHAT_ID, reply_markup)
+                else:
+                    logger.warning("TELEGRAM_CHAT_ID or TELEGRAM_WEBAPP_URL not configured. Could not send Web App notification.")
+        except Exception as e:
+            logger.error(f"Error syncing user {user.email}: {e}")
+
+@router.get("/cron/sync")
+async def cron_sync(background_tasks: BackgroundTasks):
+    background_tasks.add_task(process_cron_sync)
+    return {"status": "ok", "message": "Sync started in the background"}
 
 @router.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
