@@ -2,7 +2,10 @@ import logging
 from app.models.task import Task
 from app.models.email import Email
 import asyncio
-from win11toast import toast
+try:
+    from win11toast import toast
+except ImportError:
+    toast = None
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,10 @@ async def check_and_notify_tasks():
             thread_url = f"https://mail.google.com/mail/u/0/#all/{email.thread_id}"
             
             def send_toast():
+                if toast is None:
+                    logger.info(f"Notification skipped (win11toast missing) for task: {task.title}")
+                    return
+                    
                 body_text = f"Priority: {task.priority}\n"
                 if task.deadline:
                     body_text += f"Deadline: {task.deadline}"
